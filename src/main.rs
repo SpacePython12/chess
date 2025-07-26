@@ -53,6 +53,7 @@ pub fn main() {
         (piece, texture)
     }).collect::<HashMap<_, _>>(); 
 
+    // let mut board = Board::from_fen("rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8").unwrap();
     let mut board = Board::new();
 
     let mut mouse_click: Option<(bool, i32, i32)> = None;
@@ -60,9 +61,11 @@ pub fn main() {
 
     let mut checkmate: Option<PieceColor> = None;
 
+    let mut moving_piece: Option<(Piece, Position, Option<(Position, std::time::Instant, std::time::Instant)>)> = None;
+
     let mut log = Vec::new();
 
-    let player_color = if let Ok(button) = sdl2::messagebox::show_message_box(
+    let player_color_ = if let Ok(button) = sdl2::messagebox::show_message_box(
         messagebox::MessageBoxFlag::INFORMATION, 
         &[
             messagebox::ButtonData {
@@ -82,18 +85,24 @@ pub fn main() {
         None
     ) {
         match button {
-            messagebox::ClickedButton::CloseButton => PieceColor::White,
+            messagebox::ClickedButton::CloseButton => std::process::exit(0),
             messagebox::ClickedButton::CustomButton(button_data) => match button_data.button_id {
                 0 => PieceColor::White,
                 1 => PieceColor::Black,
                 _ => unreachable!()
             },
         }
-    } else { PieceColor::White }; 
+    } else { std::process::exit(0) }; 
 
-    let mut human_player = human_player::HumanPlayer::new(player_color);
+    let play_white = false;
+    let play_black = false;
 
-    let mut computer_player = computer_player::ComputerPlayer::new(!player_color);
+    let mut players: [Box<dyn std::any::Any>; 2] = [
+        if play_white { Box::new(human_player::HumanPlayer::new(PieceColor::White)) } else { Box::new(computer_player::ComputerPlayer::new(PieceColor::White)) },
+        if play_black { Box::new(human_player::HumanPlayer::new(PieceColor::Black)) } else { Box::new(computer_player::ComputerPlayer::new(PieceColor::Black)) },
+    ];
+
+    let mut current_player: &mut dyn std::any::Any = players[board.side_to_move().is_black() as usize].as_mut();
     
     canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
     canvas.set_draw_color(Color::RGB(127, 127, 127));
@@ -114,12 +123,12 @@ pub fn main() {
                 },
                 Event::MouseButtonDown { timestamp, window_id, which, mouse_btn, clicks, x, y } => {
                     if mouse_btn == mouse::MouseButton::Left {
-                        mouse_click = Some((true, x, y))
+                        mouse_click = Some((true, x, y));
                     }
                 },
                 Event::MouseButtonUp { timestamp, window_id, which, mouse_btn, clicks, x, y } => {
                     if mouse_btn == mouse::MouseButton::Left {
-                        mouse_click = Some((false, x, y))
+                        mouse_click = Some((false, x, y));
                     }
                 }
                 Event::MouseMotion { timestamp, window_id, which, mousestate, x, y, xrel, yrel } => {
@@ -131,48 +140,69 @@ pub fn main() {
         // The rest of the game loop goes here...
 
         {
-            if board.side_to_move() == player_color {
+            if let Some(human_player) = current_player.downcast_mut::<human_player::HumanPlayer>() {
                 if !human_player.in_turn() {
                     human_player.begin_turn(&board);
                     if human_player.move_count() == 0 && human_player.in_check() {
-                        checkmate.replace(player_color);
+                        checkmate.replace(board.side_to_move());
                     }
                 }
                 if let Some((down, x, y)) = mouse_click {
                     let (rank, file) = (y / 80, x / 80);
                     if (0..8).contains(&rank) && (0..8).contains(&file) {
-                        let piece_pos = if player_color.is_white() {
+                        let piece_pos = if board.side_to_move().is_white() || true {
                             Position::new((7-rank) as u8, file as u8)
                         } else {
                             Position::new(rank as u8, file as u8)
                         };
                         if down {
-                            human_player.set_start_position(piece_pos);
+                            if let Some(piece) = board.get(piece_pos) {
+                                
+                                if human_player.set_start_position(piece_pos) {
+                                    moving_piece.replace((piece, piece_pos, None));
+                                }
+                            }
                         } else if !down {
                             if human_player.set_target_position(piece_pos) {
                                 if human_player.needs_promotion_choice() {
                                     unimplemented!();
                                 }
                                 human_player.finish_turn(&mut board);
+
+                                current_player = players[board.side_to_move().is_black() as usize].as_mut();
                             } else {
                                 human_player.cancel_move();
                             }
+                            moving_piece.take();
                         }
                     } else if !down {
                         human_player.cancel_move();
+                        moving_piece.take();
                     }
                 }
-            } else {
-                let start = std::time::Instant::now();
-                if let Some(_move) = computer_player.play(&mut board) {
-                    log.push(_move);
+            } else if let Some(computer_player) = current_player.downcast_mut::<computer_player::ComputerPlayer>() {
+                
+                if let Some((_, _, Some((_, _, anim_end)))) = moving_piece {
+                    let now = std::time::Instant::now();
+                    if now > anim_end {
+                        moving_piece.take();
+                        computer_player.finish_turn(&mut board);
+                        current_player = players[board.side_to_move().is_black() as usize].as_mut();
+                    }
                 } else {
-                    if computer_player.move_count() == 0 && computer_player.in_check() {
-                        checkmate.replace(!player_color);
+                    let start = std::time::Instant::now();
+                    if let Some(mov) = computer_player.begin_turn(&mut board) {
+                        println!("Computer move took {} ms", start.elapsed().as_millis());
+                        let now = std::time::Instant::now();
+                        moving_piece.replace((mov.piece(&board), mov.src(), Some((mov.dst(), now, now + std::time::Duration::from_secs_f32(0.25)))));
+                        log.push(mov);
+                    } else {
+                        if computer_player.move_count() == 0 && computer_player.in_check() {
+                            checkmate.replace(board.side_to_move());
+                        }
                     }
                 }
                 
-                println!("Computer move took {} ms", start.elapsed().as_millis());
             }
         }
 
@@ -180,7 +210,7 @@ pub fn main() {
             for file in (0u8..8) {
                 let square_rect = Rect::new((file as i32) * 80, (rank as i32) * 80, 80, 80);
                 let piece_rect = Rect::new(((file as i32) * 80) + 10, ((rank as i32) * 80) + 10, 60, 60);
-                let piece_pos: Position = if player_color.is_white() {
+                let piece_pos: Position = if board.side_to_move().is_white() || true {
                     (7-rank, file).into()
                 } else {
                     (rank, file).into()
@@ -194,7 +224,8 @@ pub fn main() {
                 canvas.fill_rect(square_rect).unwrap();
                 let _ = canvas.string(piece_rect.x as i16, piece_rect.y as i16, &format!("{}", piece_pos), Color::RGBA(191, 191, 191, 127));
                 
-                if board.side_to_move() == player_color {
+                // Draw green circle if player can move there
+                if let Some(human_player) = current_player.downcast_ref::<human_player::HumanPlayer>() {
                     if let Some(old_piece_pos) = human_player.start_position() {
                         if human_player.can_move_to(piece_pos) {
                             let center = square_rect.center();
@@ -204,13 +235,15 @@ pub fn main() {
                     }
                 }
 
+                // Draw highlight if mouse is hovering
                 if square_rect.contains_point(mouse_pos) {
                     canvas.set_draw_color(Color::RGBA(255, 255, 255, 63));
                     canvas.fill_rect(square_rect).unwrap();
                 }
 
+                // Draw piece if present and not being moved
                 if let Some(piece) = board.get(piece_pos) {
-                    if board.side_to_move() != player_color || human_player.start_position().is_none_or(|pos| pos != piece_pos) {
+                    if moving_piece.is_none_or(|(_, src, _)| src != piece_pos) {
                         let texture = textures.get(&piece).unwrap();
                         canvas.copy(texture, None, piece_rect).unwrap();
                     }
@@ -218,13 +251,29 @@ pub fn main() {
             }
         }
 
-        if board.side_to_move() == player_color {
-            if let Some(piece_pos) = human_player.start_position() {
-                if let Some(piece) = board.get(piece_pos) {
-                    let piece_rect = Rect::new(mouse_pos.0 - 30, mouse_pos.1 - 30, 60, 60);
-                    let texture = textures.get(&piece).unwrap();
-                    canvas.copy(texture, None, piece_rect).unwrap();
-                }
+        // Draw grabbed piece
+        if let Some((piece, src, dst)) = moving_piece {
+            if let Some((dst, anim_start, anim_end)) = dst {
+                // Computer (animated) move
+                let now = std::time::Instant::now();
+                let blend = ((now - anim_start).as_secs_f32() / (anim_end - anim_start).as_secs_f32()).clamp(0.0, 1.0);
+
+                let src_x = ((src.file() as i32 * 80) + 10) as f32;
+                let src_y = (((7-src.rank()) as i32 * 80) + 10) as f32;
+                let dst_x = ((dst.file() as i32 * 80) + 10) as f32;
+                let dst_y = (((7-dst.rank()) as i32 * 80) + 10) as f32;
+
+                let anim_x = ((blend * dst_x) + ((1.0 - blend) * src_x)) as i32;
+                let anim_y = ((blend * dst_y) + ((1.0 - blend) * src_y)) as i32;
+
+                let piece_rect = Rect::new(anim_x, anim_y, 60, 60);
+                let texture = textures.get(&piece).unwrap();
+                canvas.copy(texture, None, piece_rect).unwrap();
+            } else {
+                // Human move
+                let piece_rect = Rect::new(mouse_pos.0 - 30, mouse_pos.1 - 30, 60, 60);
+                let texture = textures.get(&piece).unwrap();
+                canvas.copy(texture, None, piece_rect).unwrap();
             }
         }
 
@@ -235,14 +284,7 @@ pub fn main() {
             
             let mut line = 0i16;
             for move_result in log.iter().rev().take(20).rev() {
-                let string = match move_result.kind() {
-                    MoveKind::Basic => {
-                        let (or, of) = move_result.src().into_chars();
-                        let (nr, nf) = move_result.dst().into_chars();
-                        format!("{} {}{} -> {}{}", "", or, of, nr, nf)
-                    },
-                    _ => {"".into()}
-                };
+                let string = format!("{move_result}");
 
                 canvas.string(645, 5 + (line*10), &string, Color::WHITE).unwrap();
                 line += 1;

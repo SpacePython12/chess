@@ -136,7 +136,7 @@ impl Piece {
             if c.is_ascii_uppercase() {
                 Some(Self::new(kind, PieceColor::White))
             } else {
-                Some(Self::new(kind, PieceColor::White))
+                Some(Self::new(kind, PieceColor::Black))
             }
         } else {
             None
@@ -162,6 +162,12 @@ impl Piece {
 
     pub const fn value(&self) -> i32 {
         self.kind.value()
+    }
+}
+
+impl std::fmt::Display for Piece {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.into_char())
     }
 }
 

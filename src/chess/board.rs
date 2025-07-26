@@ -64,12 +64,16 @@ impl Board {
 
     pub fn from_fen(fen: &str) -> anyhow::Result<Self> {
         let mut this = Self::default();
+        this.game_state_history.push(GameState::default());
         let mut rank = 7u8;
         let mut file = 0u8;
-        for c in fen.chars() {
+        let mut fen_iter = fen.splitn(6, ' ');
+
+        // Piece placement
+        for c in fen_iter.next().unwrap().chars() {
             let pos = Position::new(rank, file);
             if let Some(piece) = Piece::from_char(c) {
-                
+                // println!("{piece} -> {pos} ({rank} {file})");
                 this.set(pos, Some(piece));
                 file += 1;
             } else {
@@ -89,11 +93,49 @@ impl Board {
                     c => anyhow::bail!("Unexpected character {c} in FEN string")
                 }
             }
-            if file >= 8 {
-                file = 0;
-                rank -= 1;
+        }
+
+        // Side to move
+        match fen_iter.next().unwrap() {
+            "w" => {
+                this.side_to_move = PieceColor::White;
+            },
+            "b" => {
+                this.side_to_move = PieceColor::Black;
+            },
+            s => anyhow::bail!("Invalid side to move parameter '{s}'")
+        }
+
+        // Castling rights
+        for c in fen_iter.next().unwrap().chars() {
+            let gamestate = this.current_game_state_mut();
+            match c {
+                'K' => gamestate.castle_state.set(CastleKind::WhiteKingside),
+                'Q' => gamestate.castle_state.set(CastleKind::WhiteQueenside),
+                'k' => gamestate.castle_state.set(CastleKind::BlackKingside),
+                'q' => gamestate.castle_state.set(CastleKind::BlackQueenside),
+                '-' => {}, // Empty set
+                c => anyhow::bail!("Unexpected character '{c}' in castling rights parameter")
             }
         }
+
+        // En passant target square
+        {
+            let mut chars = fen_iter.next().unwrap().chars();
+            let rchar = chars.next().unwrap();
+            if rchar != '-' {
+                let fchar = chars.next().unwrap();
+                if let Some(pos) = Position::from_chars(rchar, fchar) {
+                    let gamestate = this.current_game_state_mut();
+                    gamestate.en_passant_file.replace(pos.file());
+                }
+            } 
+        }
+
+        // Halfmove counter
+        this.current_game_state_mut().fifty_move_counter = fen_iter.next().unwrap().parse::<u8>()?;
+
+        // Fullmove counter doesn't have a use at the moment
 
         Ok(this)
     }
@@ -219,7 +261,11 @@ impl Board {
         self.game_state_history.last().unwrap()
     }
 
-    pub fn make_move(&mut self, move_to_make: Move, promotion: Option<PromotionKind>, in_search: bool) {
+    fn current_game_state_mut(&mut self) -> &mut GameState {
+        self.game_state_history.last_mut().unwrap()
+    }
+
+    pub fn make_move(&mut self, move_to_make: Move, in_search: bool) {
         let src = move_to_make.src();
         let dst = move_to_make.dst();
         let move_kind = move_to_make.kind();
@@ -288,8 +334,8 @@ impl Board {
             }
         }
 
-        if move_kind == MoveKind::Promotion {
-            let promoted_piece = Piece::new(match promotion.expect("Expected a promotion kind when promotion is specified") {
+        if let Some(promotion_kind) = move_to_make.promotion_kind() {
+            let promoted_piece = Piece::new(match promotion_kind {
                 moves::PromotionKind::Queen => PieceKind::Queen,
                 moves::PromotionKind::Knight => PieceKind::Knight,
                 moves::PromotionKind::Rook => PieceKind::Rook,
@@ -368,7 +414,7 @@ impl Board {
         let dst = move_to_unmake.dst();
         let move_kind = move_to_unmake.kind();
 
-        let piece = if move_kind == MoveKind::Promotion {
+        let piece = if move_to_unmake.is_promotion() {
             Piece::new(PieceKind::Pawn, self.side_to_move)
         } else {
             self.get(dst).unwrap()

@@ -414,13 +414,13 @@ impl MoveGenerator {
     }
 
     fn generate_promotions<F: FnMut(Move)>(&self, src: Position, dst: Position, push: &mut F) {
-        push(Move::new(src, dst, moves::MoveKind::Promotion));
-        // push(Move::new(src, dst, moves::MoveKind::Promotion(PromotionKind::Queen)));
-        // if self.generate_quiet_moves {
-        //     push(Move::new(src, dst, moves::MoveKind::Promotion(PromotionKind::Rook)));
-        //     push(Move::new(src, dst, moves::MoveKind::Promotion(PromotionKind::Bishop)));
-        //     push(Move::new(src, dst, moves::MoveKind::Promotion(PromotionKind::Knight)));
-        // }
+        // push(Move::new(src, dst, moves::MoveKind::Promotion));
+        push(Move::new(src, dst, moves::MoveKind::Promotion(PromotionKind::Queen)));
+        if self.generate_quiet_moves {
+            push(Move::new(src, dst, moves::MoveKind::Promotion(PromotionKind::Rook)));
+            push(Move::new(src, dst, moves::MoveKind::Promotion(PromotionKind::Bishop)));
+            push(Move::new(src, dst, moves::MoveKind::Promotion(PromotionKind::Knight)));
+        }
     }
 
     fn in_check_after_en_passant(&self, src: Position, dst: Position, en_passant_capture: Position, board: &Board) -> bool {
@@ -437,6 +437,53 @@ impl MoveGenerator {
             let ortho_attacks = magic::get_orthogonal_attacks(board.king_pos(self.color(board)), masked_blockers);
             !(ortho_attackers & ortho_attackers).is_empty()
         } else { false }
+    }
+}
+
+mod movegen_test {
+    use crate::chess::{Board, Move, MoveGenerator, MoveKind, PromotionKind};
+
+    #[test]
+    fn move_count_test() {
+        let mut board = Board::from_fen("rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8").unwrap();
+        let mut move_gen = MoveGenerator::new();
+        let mut moves = Vec::new();
+        println!("Move count: {}", count_moves(&mut board, &mut move_gen, &mut moves, 2, false, true));
+    }
+
+    fn count_moves(board: &mut Board, move_gen: &mut MoveGenerator, moves: &mut Vec<Move>, depth: usize, is_promotion: bool, is_outermost: bool) -> usize {
+        if depth == 0 {
+            if is_promotion {
+                return 4;
+            } else {
+                return 1;
+            }
+        }
+
+        let moves_start = moves.len();
+    
+        move_gen.generate_moves(board, &mut |mov| moves.push(mov), false);
+    
+        let moves_end = moves.len();
+
+        moves[moves_start..moves_end].sort_unstable(); // In order to get the prints to line up with Stockfish's outputs 
+
+        let mut count = 0usize;
+
+        for i in moves_start..moves_end {
+            let mov = moves[i];
+            board.make_move(mov, true);
+            let tmp = count_moves(board, move_gen, moves, depth-1, mov.is_promotion(), false);
+            if is_outermost {
+                println!("{mov}: {tmp}");
+            }
+            count += tmp;
+            board.unmake_move(mov, true);
+        }
+
+        moves.truncate(moves_start);
+
+        count
     }
 }
 
@@ -483,13 +530,15 @@ impl MoveTree {
     }
 
     pub fn has_promotion(&self, src: Position, dst: Position) -> bool {
-        self.kind[src.into_index() as usize][dst.into_index() as usize].is_some_and(|kind| kind == MoveKind::Promotion)
+        self.kind[src.into_index() as usize][dst.into_index() as usize].is_some_and(|kind| kind.is_promotion())
     }
 
-    pub fn get(&self, src: Position, dst: Position) -> Option<Move> {
+    pub fn get(&self, src: Position, dst: Position, promotion: Option<PromotionKind>) -> Option<Move> {
         if self.has_dst(src, dst) {
             let kind = self.kind[src.into_index() as usize][dst.into_index() as usize].unwrap();
-            Some(Move::new(src, dst, kind))
+            Some(Move::new(src, dst, if kind.is_promotion() {
+                MoveKind::Promotion(promotion.expect("Promotion must be provided when move is a promotion."))
+            } else { kind }))
         } else {
             None
         }

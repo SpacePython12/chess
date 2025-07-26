@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::{collections::HashMap, sync::{LazyLock, OnceLock, RwLock}};
 
 use crate::chess::{bitboards::BitBoard, position::*};
 use super::*;
@@ -486,7 +486,22 @@ const fn write_attacks(table: &mut [BitBoard], ortho: bool) {
     }
 }
 
-const SLIDING_MOVE_TABLE_SIZE: usize = 87988*2;
+const SLIDING_MOVE_TABLE_SIZE: usize = 87988;
+
+static SLIDING_MOVES: LazyLock<RwLock<HashMap<(Position, BitBoard, bool), BitBoard>>> = LazyLock::new(|| RwLock::new(HashMap::new()));
+
+fn get_sliding_attacks_worse(pos: Position, blockers: BitBoard, ortho: bool) -> BitBoard {
+    let lock = SLIDING_MOVES.read().unwrap();
+    let key = (pos, blockers, ortho);
+    if lock.contains_key(&key) {
+        *lock.get(&key).unwrap()
+    } else {
+        let val = BitBoard(create_sliding_moves(pos.into_index() as usize, blockers.0, ortho));
+        drop(lock);
+        SLIDING_MOVES.write().unwrap().insert(key, val);
+        val
+    }
+}
 
 static SLIDING_MOVE_TABLE: [OnceLock<BitBoard>; SLIDING_MOVE_TABLE_SIZE] = [const { OnceLock::new() }; SLIDING_MOVE_TABLE_SIZE];
 
@@ -515,11 +530,11 @@ fn get_sliding_attacks(pos: Position, blockers: BitBoard, ortho: bool) -> BitBoa
 // }
 
 pub fn get_orthogonal_attacks(pos: Position, blockers: BitBoard) -> BitBoard {
-    get_sliding_attacks(pos, blockers, true)
+    get_sliding_attacks_worse(pos, blockers, true)
 }
 
 pub fn get_diagonal_attacks(pos: Position, blockers: BitBoard) -> BitBoard {
-    get_sliding_attacks(pos, blockers, false)
+    get_sliding_attacks_worse(pos, blockers, false)
 }
 
 pub fn get_king_moves(pos: Position) -> BitBoard {

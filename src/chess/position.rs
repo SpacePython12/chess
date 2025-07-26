@@ -1,6 +1,6 @@
 use crate::chess::bitboards::BitBoard;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position(u8);
 
 impl From<(u8, u8)> for Position {
@@ -179,6 +179,17 @@ impl Position {
             '8'
         ];
         (FILES[self.file() as usize], RANKS[self.rank() as usize])
+    }
+
+    pub fn from_chars(rchar: char, fchar: char) -> Option<Self> {
+        if let (Some(rank), Some(file)) = (
+            if ('1'..='8').contains(&rchar) {
+                Some((rchar as u8)-('1' as u8))
+            } else { None },
+            if ('a'..='h').contains(&fchar) {
+                Some((fchar as u8)-('a' as u8))
+            } else { None }
+        ) { Some(Self::new(rank, file)) } else { None }
     }
     
     pub const fn wrapping_offset(self, offset: Offset) -> Self {

@@ -10,7 +10,7 @@ pub struct ComputerPlayer {
     color: PieceColor,
     move_generator: MoveGenerator,
     moves: Vec<Move>,
-
+    current_move: Option<Move>,
 }
 
 impl ComputerPlayer {
@@ -18,7 +18,8 @@ impl ComputerPlayer {
         Self {
             color,
             move_generator: MoveGenerator::new(),
-            moves: Vec::new()
+            moves: Vec::new(),
+            current_move: None
         }
     }
 
@@ -31,6 +32,7 @@ impl ComputerPlayer {
     }
 
     fn order_moves(moves: &mut [Move], board: &Board) {
+        moves.shuffle(&mut rand::rng());
         moves.sort_unstable_by_key(|current_move| {
             let mut score = 0;
             let piece = current_move.piece(board);
@@ -38,7 +40,7 @@ impl ComputerPlayer {
                 score = 10 * capture.value() - piece.value()
             }
 
-            if current_move.kind() == MoveKind::Promotion {
+            if current_move.is_promotion() {
                 score += Piece::new(PieceKind::Queen, piece.color).value();
             }
 
@@ -46,15 +48,15 @@ impl ComputerPlayer {
         });
     }
     
-    fn evaluate(color: PieceColor, board: &Board) -> i32 {
-        let our_value = board.total_value(color);
-        let their_value = board.total_value(!color);
+    fn evaluate(board: &Board) -> i32 {
+        let our_value = board.total_value(board.side_to_move());
+        let their_value = board.total_value(!board.side_to_move());
         our_value - their_value
     }
     
-    fn search(&mut self, depth: usize, alpha: i32, beta: i32, color: PieceColor, board: &mut Board, best_move: &mut Option<Move>, iterations: &mut usize) -> i32 {
+    fn search(&mut self, depth: usize, alpha: i32, beta: i32, board: &mut Board, best_move: &mut Option<Move>, iterations: &mut usize) -> i32 {
         if depth == 0 {
-            return Self::evaluate(color, board);
+            return Self::evaluate(board);
         }
     
         let moves_start = self.moves.len();
@@ -67,7 +69,7 @@ impl ComputerPlayer {
     
         let ret = if moves_end == moves_start {
             // No available moves
-            if board.in_check(color) {
+            if board.in_check(board.side_to_move()) {
                 -i32::MAX// So that when it's negated it won't overflow 
             } else {
                 0
@@ -77,9 +79,14 @@ impl ComputerPlayer {
             
             for i in moves_start..moves_end {
                 let current_move = self.moves[i];
-                board.make_move(current_move, Some(PromotionKind::Queen), true);
-                let evaluation = -self.search(depth - 1, -beta, -alpha, !color, board, &mut None, iterations);
-                board.unmake_move(current_move, true);
+                let evaluation = if current_move.capture(board).is_some_and(|piece| piece.kind == PieceKind::King) {
+                    i32::MAX // It's a check!
+                } else {
+                    board.make_move(current_move, true);
+                    let evaluation = -self.search(depth - 1, -beta, -alpha, board, &mut None, iterations);
+                    board.unmake_move(current_move, true);
+                    evaluation
+                };
                 *iterations += 1;
                 if evaluation >= beta  {
                     best_evaluation = beta;
@@ -99,15 +106,15 @@ impl ComputerPlayer {
         ret
     }
 
-    pub fn play(&mut self, board: &mut Board) -> Option<Move> {
+    pub fn begin_turn(&mut self, board: &mut Board) -> Option<Move> {
         
         let mut best_move = None;
         let mut iterations = 0;
-        let best_eval = self.search(4, -i32::MAX, i32::MAX, self.color, board, &mut best_move, &mut iterations);
+        let best_eval = self.search(5, -i32::MAX, i32::MAX, board, &mut best_move, &mut iterations);
         println!("Iterations searched: {}", iterations);
         if let Some(best_move) = best_move {
             println!("Evaluation: {}", best_eval);
-            board.make_move(best_move, Some(PromotionKind::Queen), false);
+            self.current_move.replace(best_move);
             Some(best_move)
         } else {
             None
@@ -119,5 +126,11 @@ impl ComputerPlayer {
         //     board.make_move(chosen_move, Some(PromotionKind::Queen), false);
         // }
         // chosen_move
+    }
+
+    pub fn finish_turn(&mut self, board: &mut Board) {
+        if let Some(current_move) = self.current_move.take() {
+            board.make_move(current_move, false);
+        }
     }
 }

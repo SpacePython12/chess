@@ -55,7 +55,7 @@ impl PieceBoard {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct BitBoard(pub u64);
 
 impl From<u64> for BitBoard {

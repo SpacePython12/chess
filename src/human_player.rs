@@ -104,8 +104,8 @@ impl HumanPlayer {
 
     pub fn finish_turn(&mut self, board: &mut Board) -> Option<Move> {
         if let (Some(start_pos), Some(target_pos), promotion) = (self.start_pos, self.target_pos, self.promotion) {
-            if let Some(_move) = self.move_tree.get(start_pos, target_pos) {
-                board.make_move(_move, promotion, false);
+            if let Some(_move) = self.move_tree.get(start_pos, target_pos, promotion) {
+                board.make_move(_move, false);
                 self.in_turn = false;
                 return Some(_move);
             }

@@ -22,7 +22,23 @@ pub enum MoveKind {
     EnPassant,
     Castle,
     PawnDoublePush,
-    Promotion,
+    Promotion(PromotionKind),
+}
+
+impl MoveKind {
+    pub fn is_promotion(&self) -> bool {
+        match self {
+            Self::Promotion(_) => true,
+            _ => false
+        }
+    }
+
+    pub fn promotion_kind(&self) -> Option<PromotionKind> {
+        match self {
+            Self::Promotion(kind) => Some(*kind),
+            _ => None
+        }
+    }
 }
 
 impl super::IntoPacked for MoveKind {
@@ -36,13 +52,13 @@ impl super::IntoPacked for MoveKind {
             MoveKind::EnPassant => 0b001,
             MoveKind::Castle => 0b010,
             MoveKind::PawnDoublePush => 0b011,
-            MoveKind::Promotion => 0b100,
-            // MoveKind::Promotion(promotion_kind) => match promotion_kind {
-            //     PromotionKind::Queen => 0b100,
-            //     PromotionKind::Knight => 0b101,
-            //     PromotionKind::Rook => 0b110,
-            //     PromotionKind::Bishop => 0b111,
-            // },
+            // MoveKind::Promotion => 0b100,
+            MoveKind::Promotion(promotion_kind) => match promotion_kind {
+                PromotionKind::Queen => 0b100,
+                PromotionKind::Knight => 0b101,
+                PromotionKind::Rook => 0b110,
+                PromotionKind::Bishop => 0b111,
+            },
         }
     }
 }
@@ -54,11 +70,11 @@ impl super::FromPacked for MoveKind {
             0b001 => MoveKind::EnPassant,
             0b010 => MoveKind::Castle,
             0b011 => MoveKind::PawnDoublePush,
-            0b100..=0b111 => MoveKind::Promotion,
-            // 0b100 => MoveKind::Promotion(PromotionKind::Queen),
-            // 0b101 => MoveKind::Promotion(PromotionKind::Knight),
-            // 0b110 => MoveKind::Promotion(PromotionKind::Rook),
-            // 0b111 => MoveKind::Promotion(PromotionKind::Bishop),
+            // 0b100..=0b111 => MoveKind::Promotion,
+            0b100 => MoveKind::Promotion(PromotionKind::Queen),
+            0b101 => MoveKind::Promotion(PromotionKind::Knight),
+            0b110 => MoveKind::Promotion(PromotionKind::Rook),
+            0b111 => MoveKind::Promotion(PromotionKind::Bishop),
             _ => unreachable!()
         }
     }
@@ -67,9 +83,9 @@ impl super::FromPacked for MoveKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PromotionKind {
     Queen,
-    Knight,
     Rook,
     Bishop,
+    Knight,
 }
 
 
@@ -113,12 +129,40 @@ impl Move {
         })
     }
 
-    // pub fn promotion_kind(&self) -> Option<PromotionKind> {
-    //     match self.kind() {
-    //         MoveKind::Promotion(promotion_kind) => Some(promotion_kind),
-    //         _ => None
-    //     }
-    // }
+    pub fn is_promotion(&self) -> bool {
+        self.kind().is_promotion()
+    }
+
+    pub fn promotion_kind(&self) -> Option<PromotionKind> {
+        self.kind().promotion_kind()
+    }
+}
+
+impl std::fmt::Display for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.src(), self.dst())?;
+        if let Some(kind) = self.promotion_kind() {
+            write!(f, "{}", match kind {
+                PromotionKind::Queen => 'q',
+                PromotionKind::Knight => 'n',
+                PromotionKind::Rook => 'r',
+                PromotionKind::Bishop => 'b',
+            })?;
+        }
+        Ok(())
+    }
+}
+
+impl PartialOrd for Move {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Move {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.src().cmp(&other.src()).then(self.dst().cmp(&other.dst())).then(self.promotion_kind().cmp(&other.promotion_kind()))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
