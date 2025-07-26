@@ -1,0 +1,13 @@
+[package]
+name = "chess"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.89"
+arrayvec = "0.7.6"
+image = "0.25.2"
+rand = "0.9.1"
+sdl2 = { version = "0.37.0", features = ["gfx", "ttf"] }
